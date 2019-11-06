@@ -30,7 +30,7 @@ ECData = read_rds("ECData.rds")
 
 
 #Subsetting the required data for modelling
-beta_data = ECData[,c(1:5,10,15,17:18)]
+beta_data = ECData[,c(1:5,10,12:15,17:18)]
 
 #Renaming the column values as 0,1 for modelling purpose
 beta_data$author_hidden = ifelse(beta_data$author_hidden == 't',0,1)
@@ -41,10 +41,9 @@ beta_data$has_link = ifelse(beta_data$has_link == TRUE,0,1)
 #Permutation
 comb_data = expand.grid(c(0,1),c(0,1),c(0,1),c(0,1))
 colnames(comb_data) = c('has_link','author_hidden','has_video','comments_enabled')  
-comb_data = data.frame(cbind(ECData[2:17,1:5]),comb_data)
+comb_data = data.frame(cbind(beta_data[2:17,c(1:5,7:9)],comb_data))
 t_comb_data = t(comb_data)
 colnames(t_comb_data)  = c(paste0("X",1:16))
-
 
 
 
@@ -53,63 +52,60 @@ colnames(t_comb_data)  = c(paste0("X",1:16))
 d = 16  #Number of arms
 total_reward = 0  #would you calculate this and how will you use this?
 
-#Thompson Sampling
 
-numbers_of_rewards_1 = t_comb_data[2,]                        #prior alpha parameter - uniq_opens
-numbers_of_rewards_0 = t_comb_data[1,] - t_comb_data[2,]      #prior beta parameter -  Not_Opened = delivered - Opened
-#Where is Binomial distribution coming into picture? 
-#Is setting parameters using N(delivered) where we are considering the binomial distribution ?
 
-message = 0                                                    #Initializing the Message to 0
-max_random = 0                                                #Initializing the maximum random estimate (Theta_k)
+#Modying John's Algorithm for Logistic
 
-set.seed(123)
-#Following the steps for Algorithm 2:Bern Thompson Sampling : Page 7- file:///C:/Users/srumao/Desktop/RL/A%20Tutorial%20on%20Thompson%20Sampling.pdf
-# for (i in 1:d) 
-# {
-#   
-#   #Randomly sampling theta_k estimate from the posterior beta distribution for the paramters(alpha,beta) defined above. 
-#   random_beta = rbeta(n = 1,
-#                       shape1 = numbers_of_rewards_1[i],             
-#                       shape2 = numbers_of_rewards_0[i] )
-#   if (random_beta > max_random) 
-#   {
-#     max_random = random_beta
-#     #Returning the message at which theta_k is maximum
-#     message = i   
-#   }
-#   
-# }
 
+######   Attempt 1  
 
 ###### John's attempt at TS
 # learning the underlying theta
+
 set.seed(1234)
-n = 1000
-arm = numeric(n)
-alpha = beta = numeric(d)
-alpha[1] = beta[1] = 1 # prior
-y = numeric(n) # experiment outcome
+n = 1000              #Number of users
+arm = numeric(n)      #Best arm for each user.
+
+# Changing the parameter to be updated as the number of uniq_opens
+#alpha = beta = numeric(d)
+#alpha[1] = beta[1] = 1 # prior
+
+#Taking the outcome to be uniq opens
+y = numeric(n) # experiment outcome for each user
+
+p = comb_data[,2]
+nn = comb_data[,1]
+
 theta = t_comb_data["openrate",]
 #theta = c(0.99, rep(0.01,15))
 thetahat = matrix(0, nrow = n, ncol = d)
 
-for( ii in 1:n){
-  thetahat[ii,] = rbeta(d,shape1 = alpha,shape2 = beta)
+view(comb_data)
+
+
+for(ii in 1:n){
   
-  arm[ii] = which.max(thetahat[ii,]) # choose an arm
+  fit.1 <- glm(cbind(p, nn - p) ~ polarity + punc_intensity + title_length ,  data = comb_data, family = binomial(link = logit))
   
+  #Error : Error in family$linkfun(mustart) : Value 1.67458 out of range (0, 1)  
+  #This error made me go crazyyyyy
+  
+  thetahat[ii,] = predict(fit.1,type = "response")
+  arm[ii] = which.max(thetahat[ii,]) #choose an arm
   
   # perform the experiment using the "population" theta
   
-  y[ii] = rbernoulli(1,p = theta[arm[ii]])
-  
+  kk = arm[ii]
+  y[ii] = rbinom(1,nn[kk],p = theta[arm[ii]]) #How many of the delivered messages will the ii user open?
+  #comb_data[ii,2] = rbernoulli(1,p = theta[arm[ii]])  #Why not taking theta_hat here?
   #Keep a count of y for each arm somewhere
   
-  kk = arm[ii]
-  alpha[kk] =    alpha[kk] + y[ii]
-  beta[kk] =   beta[kk] + 1-y[ii]
+  p[kk] = p[kk] + y[ii]
+  #This is exploration
+  #What about exploitation How to deduct regret as in the case of beta parameter in beta regression?
+  
 }
+
 print(thetahat[ii,])
 #print(t(t_comb_data[6:9,arm]))
 
@@ -117,9 +113,65 @@ print(cbind(theta,thetahat[n,]))
 #Take expected value print(cbind(theta,colSums(thetahat)/n))
 
 
+
+
+####### Attempt 2
+
+#Taking more data / all data from ecdata
+#Model data
+
+type = sample(1:16,134,replace = T)
+logit_data = data.frame(cbind(ECData[,c(1:5,12:14)],type))
+
+
+set.seed(1234)
+n = 1000
+arm = numeric(n)
+
+# Changing the parameter to be updated as the number of uniq_opens
+#alpha = beta = numeric(d)
+#alpha[1] = beta[1] = 1 # prior
+
+#Taking the outcome to be uniq opens
+y = numeric(n) # experiment outcome
+
+theta = logit_data[,3]
+#theta = c(0.99, rep(0.01,15))
+thetahat = matrix(0, nrow = n, ncol = 134)
+
+
+for(ii in 1:n){
+  
+  fit.1 <- glm(cbind(uniq_opens, delivered - uniq_opens) ~ polarity + punc_intensity + title_length , 
+               data = logit_data, family = binomial(link = logit))
+  
+  
+  #Error : Error in family$linkfun(mustart) : Value 1.67458 out of range (0, 1)  
+  #This error made me go crazyyyyy
+  
+  thetahat[ii,] = predict(fit.1,type = "response")[[ii]]
+  
+  arm[ii] = which.max(thetahat[ii,]) # choose an arm
+  
+  # perform the experiment using the "population" theta
+  
+  logit_data[ii,2] = rbinom(1,logit_data[ii,1],p = theta[arm[ii]])
+  #comb_data[ii,2] = rbernoulli(1,p = theta[arm[ii]])  #Why not taking theta_hat here?
+  
+  #Keep a count of y for each arm somewhere
+  
+  kk = arm[ii]
+  logit_data[kk,2] = logit_data[kk,2] + logit_data[ii,2]
+  
+}
+
+print(thetahat[ii,])
+print(cbind(theta,thetahat[n,]))
+#Take expected value print(cbind(theta,colSums(thetahat)/n))
+
+
+
 ######### End John's stuff
-
-
 
 #Calculating regret as the difference between maximum count of opened messages (or open rate) and the maximun count of opened messages obtained by        Thompson Sampling.
 regret = max(t_comb_data[2,]) - t_comb_data[2,message]
