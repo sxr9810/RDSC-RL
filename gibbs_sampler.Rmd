@@ -1,0 +1,102 @@
+---
+title: "Probit MCMC Algorithm"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+```{r}
+
+ 
+
+
+
+
+#Installing missing packages
+
+list.of.packages <- c("matlib","msm")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+#Load the libraries
+library(matlib)
+library(msm)
+
+#Define the number of columns (number of posterior thetas we want to estimate).
+D = 2
+
+#Define the number of rows (data observations)
+N = 500
+
+#Simulate X
+x = seq(0,1,length = 500)       ###Here the length the is important.Depends on the number of rows you                                                           want in X matrix.
+
+#create X matrix of dimension 500 X 4   (500 X 4 = 2000 where 500 are 1's and the other 1500 are                                                simulated x's)
+
+X <- matrix(c(rep(1, N), x), ncol = D)
+
+#Simulate y (encoded as -1,1)
+y = rbinom(500,1,0.65)  #We want both classes to be balanced
+y = as.data.frame(as.factor(y))
+#Encode y as -1,1
+y = ifelse(y == 0,-1,1)
+
+
+#Initialize the parameter theta
+theta = rep(0,D)
+
+#Simulate Z
+z = matrix(rep(0,N),ncol = 1)
+
+#Initialize the final theta matrix
+theta_mat = matrix(0,nrow = N,ncol = D)
+
+#Initializing the parameters for prior distribution of theta
+b = matrix(rep(0,D),ncol = 1)
+
+#generate the covaraince matrix
+sigma = diag(5,D)   #With varaiance = 5
+
+#Computing the posterior variance Sigma
+
+sigma_inv = inv(sigma)
+x_trans = t(X) %*% X
+
+post_var = inv(sigma_inv + x_trans)
+
+
+###### Simulating the data 
+
+
+for (t in 2:N)
+  
+{
+  mean_z = theta %*% X[t,]
+  
+  #Draw z such that it is truncated 
+  
+  #For Truncated Normal Distribution,from package msm: rtnorm(n, mean=0, sd=1, lower=-Inf, upper=Inf)
+  z[y == 1] = rtnorm(length(z[y==1]), mean_z[y==1],sd=1,lower = 0,upper = Inf)
+  z[y ==-1] = rtnorm(length(z[y==-1]),mean_z,sd=1,lower = -Inf,upper = 0)
+  
+  
+  #computing posterior mean of the theta
+  theta_curl  =  post_var %*% (t(X) %*% z + sigma_inv %*% b)
+  theta = rnorm(1,theta_curl,post_var)
+  theta_mat[t,] = theta
+  
+}
+
+
+#Posterior Thetas for each of the variables can be obtained by computing the column means of the theta_mat matrix
+
+print(theta_mat)
+posterior_thetas = colMeans(theta_mat)
+print(posterior_thetas)
+print(z)
+
+##### Why am I getting same values for posterior thetas??
+
+
+```
+
